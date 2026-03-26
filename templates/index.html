@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MammoVision | Research Platform</title>
+
+<style>
+body {
+    margin:0;
+    font-family:'Segoe UI',sans-serif;
+    background:linear-gradient(135deg,#020617,#0f172a);
+    color:#e2e8f0;
+    overflow-x:hidden;
+}
+
+/* NAVBAR */
+.navbar {
+    display:flex;
+    justify-content:space-between;
+    padding:20px 40px;
+    background:rgba(255,255,255,0.03);
+    backdrop-filter:blur(10px);
+}
+
+.logo {
+    font-weight:bold;
+    color:#38bdf8;
+    font-size:1.2rem;
+}
+
+/* HERO */
+.hero {
+    text-align:center;
+    margin-top:40px;
+}
+
+.hero h1 {
+    font-size:2.7rem;
+    background:linear-gradient(90deg,#38bdf8,#6366f1);
+    -webkit-background-clip:text;
+    -webkit-text-fill-color:transparent;
+}
+
+.hero p {
+    color:#94a3b8;
+}
+
+/* CARD */
+.card {
+    max-width:650px;
+    margin:40px auto;
+    padding:25px;
+    background:rgba(255,255,255,0.05);
+    border-radius:15px;
+    box-shadow:0 0 30px rgba(56,189,248,0.1);
+}
+
+/* FORM */
+input, button {
+    width:100%;
+    padding:12px;
+    margin-top:12px;
+    border:none;
+    border-radius:8px;
+}
+
+input {
+    background:#1e293b;
+    color:white;
+}
+
+button {
+    background:linear-gradient(90deg,#38bdf8,#6366f1);
+    color:white;
+    font-weight:bold;
+    cursor:pointer;
+    transition:0.3s;
+}
+
+button:hover {
+    transform:scale(1.03);
+}
+
+/* RESULTS */
+.results {
+    max-width:1200px;
+    margin:auto;
+    padding:20px;
+}
+
+/* RESULT CARD */
+.result-card {
+    margin-top:25px;
+    padding:20px;
+    background:rgba(255,255,255,0.05);
+    border-radius:12px;
+    box-shadow:0 0 20px rgba(0,0,0,0.4);
+}
+
+/* IMAGE GRID */
+.images {
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+    gap:12px;
+    margin-top:15px;
+}
+
+.images img {
+    width:100%;
+    height:220px;
+    object-fit:cover;
+    border-radius:10px;
+}
+
+/* METRICS PANEL */
+.metrics {
+    margin-top:15px;
+    line-height:1.8;
+}
+
+/* BADGES */
+.badge {
+    padding:5px 10px;
+    border-radius:6px;
+    font-weight:bold;
+}
+
+/* COLORS */
+.low { background:#22c55e; }
+.medium { background:#f59e0b; }
+.high { background:#ef4444; }
+
+/* REGION TABLE */
+.table-container {
+    margin-top:15px;
+    overflow-x:auto;
+}
+
+table {
+    width:100%;
+    border-collapse:collapse;
+    margin-top:10px;
+}
+
+th, td {
+    padding:10px;
+    border-bottom:1px solid #334155;
+    text-align:center;
+}
+
+th {
+    background:#1e293b;
+    color:#38bdf8;
+}
+
+/* DOWNLOAD BUTTON */
+.download {
+    margin-top:30px;
+    text-align:center;
+}
+</style>
+</head>
+
+<body>
+
+<div class="navbar">
+    <div class="logo">🧬 MammoVision Research</div>
+</div>
+
+<div class="hero">
+<h1>Advanced Mammography Analysis</h1>
+<p>Computer Vision Pipeline for Breast Density & Risk Estimation</p>
+</div>
+
+<div class="card">
+<form method="POST" enctype="multipart/form-data">
+<input type="file" name="images" multiple required>
+<button>Analyze Mammograms</button>
+</form>
+</div>
+
+<div class="results">
+
+{% for r in results %}
+<div class="result-card">
+
+<h3>{{ r.name }}</h3>
+
+<!-- IMAGES -->
+<div class="images">
+<img src="/uploads/{{ r.name }}">
+<img src="/results/{{ r.name }}">
+<img src="/results/{{ r.heat }}">
+<img src="/results/{{ r.mask }}">
+</div>
+
+<!-- METRICS -->
+<div class="metrics">
+
+Risk:
+<span class="badge {{ r.result.risk|lower }}">
+{{ r.result.risk }}
+</span>
+
+<br>
+
+Density:
+<span class="badge {{ r.result.density|lower }}">
+{{ r.result.density }}
+</span>
+
+<br>
+
+Density Ratio: {{ r.result.density_ratio }}
+
+<br>
+
+Suspicious Regions: {{ r.result.regions }}
+
+<br>
+
+Average Lesion Size: {{ r.result.avg_size }}
+
+</div>
+
+<!-- REGION DETAILS TABLE -->
+{% if r.result.region_data %}
+<div class="table-container">
+<table>
+<tr>
+<th>Region</th>
+<th>Area</th>
+<th>Intensity</th>
+<th>Score</th>
+</tr>
+
+{% for region in r.result.region_data %}
+<tr>
+<td>{{ loop.index }}</td>
+<td>{{ region.area }}</td>
+<td>{{ region.intensity|round(2) }}</td>
+<td>{{ region.score }}</td>
+</tr>
+{% endfor %}
+
+</table>
+</div>
+{% endif %}
+
+</div>
+{% endfor %}
+
+<!-- DOWNLOAD REPORT -->
+{% if report %}
+<div class="download">
+<a href="/download">
+<button>Download Full Report</button>
+</a>
+</div>
+{% endif %}
+
+</div>
+
+</body>
+</html>
