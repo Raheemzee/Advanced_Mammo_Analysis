@@ -1,9 +1,6 @@
 Flask
-torch
 torchvision
 numpy
 opencv-python-headless
-pydicom
 Pillow
-scikit-image
 gunicorn
