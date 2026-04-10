@@ -1,6 +1,14 @@
+import torch
+import torch.nn as nn
+import numpy as np
+import pydicom
+import cv2
 from flask import Flask, render_template, request, send_file
-import os, cv2, numpy as np, csv
+import os, csv
 from werkzeug.utils import secure_filename
+from PIL import Image
+import torchvision.transforms as transforms
+from torchvision.models import inception_v3
 
 app = Flask(__name__)
 
@@ -10,6 +18,68 @@ REPORT = "reports"
 
 for f in [UPLOAD, RESULT, REPORT]:
     os.makedirs(f, exist_ok=True)
+
+# ================= AI MODEL =================
+
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+MODEL_PATH = "model/model.pt"
+
+CLASS_NAMES = [
+    "BI-RADS A",
+    "BI-RADS B",
+    "BI-RADS C",
+    "BI-RADS D"
+]
+
+def load_model():
+    model = inception_v3(pretrained=False, aux_logits=False)
+    model.fc = nn.Linear(model.fc.in_features, 4)
+
+    state_dict = torch.load(MODEL_PATH, map_location=DEVICE)
+
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        if k.startswith("module."):
+            k = k.replace("module.", "")
+        if k.startswith("net."):
+            k = k.replace("net.", "")
+        if k.startswith("model."):
+            k = k.replace("model.", "")
+        new_state_dict[k] = v
+
+    model.load_state_dict(new_state_dict, strict=False)
+    model.to(DEVICE)
+    model.eval()
+    return model
+
+model = load_model()
+
+def preprocess_for_model(image):
+    if len(image.shape) == 2:
+        image = np.stack([image]*3, axis=-1)
+
+    transform = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.Resize((299, 299)),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225]
+        )
+    ])
+
+    return transform(image).unsqueeze(0)
+
+def predict_density_ai(image):
+    input_tensor = preprocess_for_model(image).to(DEVICE)
+
+    with torch.no_grad():
+        output = model(input_tensor)
+        probs = torch.softmax(output, dim=1).cpu().numpy()[0]
+
+    idx = int(np.argmax(probs))
+
+    return CLASS_NAMES[idx], float(probs[idx])
 
 # ================= CORE =================
 
@@ -32,7 +102,10 @@ def analyze_mammogram(path, out, heat, mask_path):
 
     breast = cv2.bitwise_and(enhanced, enhanced, mask=mask)
 
-    # Density
+    # ================= AI PREDICTION =================
+    ai_label, ai_conf = predict_density_ai(breast)
+
+    # ================= DENSITY (RULE BASED) =================
     dense = np.sum(breast > 180)
     total = np.sum(mask > 0)
     density_ratio = dense/(total+1e-5)
@@ -41,7 +114,7 @@ def analyze_mammogram(path, out, heat, mask_path):
     elif density_ratio < 0.5: density="Medium"
     else: density="High"
 
-    # Suspicious regions
+    # ================= SUSPICIOUS REGIONS =================
     _, suspicious = cv2.threshold(breast,200,255,cv2.THRESH_BINARY)
     suspicious = cv2.morphologyEx(suspicious, cv2.MORPH_OPEN, kernel,2)
 
@@ -68,33 +141,37 @@ def analyze_mammogram(path, out, heat, mask_path):
     region_count = len(region_data)
     avg_size = np.mean([r["area"] for r in region_data]) if region_data else 0
 
-    # Risk scoring
+    # ================= RISK =================
     risk_score = density_ratio*2 + region_count*0.3 + avg_size/5000
 
     if risk_score < 1: risk="Low"
     elif risk_score < 2: risk="Moderate"
     else: risk="High"
 
-    # Save visuals
+    # ================= VISUAL =================
     heatmap = cv2.applyColorMap(enhanced, cv2.COLORMAP_JET)
     cv2.imwrite(heat, heatmap)
-    # Create clean mask of only valid suspicious regions
-    final_mask = np.zeros(gray.shape, dtype="uint8")
 
+    final_mask = np.zeros(gray.shape, dtype="uint8")
     for cnt in contours:
         area = cv2.contourArea(cnt)
         if 50 < area < 8000:
             cv2.drawContours(final_mask, [cnt], -1, 255, -1)
 
     cv2.imwrite(mask_path, final_mask)
+
+    # Overlay AI + traditional results
     cv2.putText(original,f"Risk:{risk}",(20,40),0,1,(0,0,255),2)
     cv2.putText(original,f"Density:{density}",(20,80),0,1,(255,255,0),2)
+    cv2.putText(original,f"AI:{ai_label}",(20,120),0,1,(0,255,0),2)
 
     cv2.imwrite(out, original)
 
     return {
         "density": density,
         "density_ratio": round(density_ratio,3),
+        "ai_density": ai_label,
+        "ai_confidence": round(ai_conf,3),
         "regions": region_count,
         "avg_size": int(avg_size),
         "risk": risk,
@@ -108,12 +185,16 @@ def generate_report(results):
 
     with open(path,"w",newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["Image","Density","Risk","Regions","Avg Size"])
+        writer.writerow([
+            "Image","Density","AI Density","AI Confidence","Risk","Regions","Avg Size"
+        ])
 
         for r in results:
             writer.writerow([
                 r["name"],
                 r["result"]["density"],
+                r["result"]["ai_density"],
+                r["result"]["ai_confidence"],
                 r["result"]["risk"],
                 r["result"]["regions"],
                 r["result"]["avg_size"]
